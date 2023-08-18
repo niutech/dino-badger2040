@@ -3,9 +3,82 @@ import time
 import random
 import io
 from machine import Pin
-from game_engine import *
 
 badger2040.system_speed(badger2040.SYSTEM_FAST)
+
+# Game engine
+
+class Image():
+    def __init__(self, path):
+        with open(path, "rb") as f:
+            img_format = f.readline()
+            if img_format != b"P4\n":
+                print("Wrong image format")
+                exit()
+            dimensions = f.readline()
+            w, h = [int(x) for x in dimensions.split(b" ")]
+            img = bytearray(f.read())
+        self.bitmap, self.width, self.height = img, w, h
+
+class Sprite():
+    def __init__(self, x, y, image, display):
+        self.set_pos(x, y)
+        self.image = image
+        self.display = display
+
+    def change_image(self, image):
+        self.image = image
+
+    def draw(self):
+        if self.image is not None:
+            for oy in range(self.image.height):
+                for ox in range(self.image.width):
+                    o = oy * (self.image.width >> 3) + (ox >> 3)
+                    bm = 0b10000000 >> (ox & 0b111)
+                    if self.image.bitmap[o] & bm:
+                        self.display.pixel(int(self.x) + ox, int(self.y) + oy)
+
+    def set_pos(self, x=None, y=None):
+        if x is not None:
+            self.x = x
+        if y is not None:
+            self.y = y
+
+
+class MovingObject(Sprite):
+    def __init__(self, x, y, image, display, ground=0, gravity=0):
+        super().__init__(x, y, image, display)
+        self.motion_vector = [0, 0]
+        self.gravity = gravity
+        self.ground = ground
+        self.last_tick = 0
+
+    def set_motion_vector(self, x, y):
+        if x is not None:
+            self.motion_vector[0] = x
+        if y is not None:
+            self.motion_vector[1] = y
+
+    def physics_tick(self, now):
+        diff = time.ticks_diff(now, self.last_tick) * 0.1
+        self.motion_vector[1] += self.gravity * diff
+        self.x += self.motion_vector[0] * diff
+        self.y += self.motion_vector[1] * diff
+        if self.gravity != 0 and self.y >= self.ground - self.image.height:
+            self.y = self.ground - self.image.height
+            self.motion_vector[1] = 0
+        self.last_tick = now
+
+    def on_ground(self):
+        return self.y == self.ground - self.image.height
+
+    def collision_test(self, obstacles):
+        for obstacle in obstacles:
+            if (self.x + self.image.width >= obstacle.x and obstacle.x + obstacle.image.width >= self.x and self.y + self.image.height >= obstacle.y and obstacle.y + obstacle.image.height >= self.y):
+                return obstacle
+        return None
+
+# Global variables
 
 button_a = Pin(badger2040.BUTTON_A, Pin.IN, Pin.PULL_DOWN)
 button_up = Pin(badger2040.BUTTON_UP, Pin.IN, Pin.PULL_DOWN)
@@ -16,6 +89,7 @@ display_height = badger2040.HEIGHT
 
 high_score_path = "/highscore.txt"
 high_score = 0
+score = 0
 
 dino_img = Image("/dino.pbm")
 cactus_img = Image("/cactus.pbm")
@@ -31,16 +105,16 @@ for o in obstacles:
     o.set_motion_vector(-1, 0)
 
 def clear_screen():
-    display.pen(15)
+    display.set_pen(15)
     display.clear()
-    display.pen(0)
+    display.set_pen(0)
 
 def game_loop():
     global score
     score = 0
 
     clear_screen()
-    display.update_speed(badger2040.UPDATE_TURBO)
+    display.set_update_speed(badger2040.UPDATE_TURBO)
     display.update()
 
     now = time.ticks_ms()
@@ -66,17 +140,17 @@ def game_loop():
             o.draw()
         display.text("Score: " + str(score), 10, 10)
         display.update()
-        if player.collision_test(obstacles) != None or display.pressed(badger2040.BUTTON_A):
+        if player.collision_test(obstacles) is not None or display.pressed(badger2040.BUTTON_A):
             break
 
 def start_text():
     clear_screen()
-    display.font("bitmap14_outline")
-    display.text("Dino Game", 20, 20, 2)
-    display.font("bitmap8")
-    display.text("Press UP to start, A to abort", 20, 60, 2)
-    display.text("High score: " + str(high_score), 20, 80, 2)
-    display.update_speed(badger2040.UPDATE_FAST)
+    display.set_font("bitmap14_outline")
+    display.text("Dino Game", 20, 20, scale=2)
+    display.set_font("bitmap8")
+    display.text("Press UP to start, A to abort", 20, 60, scale=2)
+    display.text("High score: " + str(high_score), 20, 80, scale=2)
+    display.set_update_speed(badger2040.UPDATE_FAST)
     display.update()
 
 try:
@@ -88,19 +162,24 @@ try:
 except OSError:
     print("High score file not found")
 
-start_text()
+# Main loop
 
-while True:
-    if display.pressed(badger2040.BUTTON_UP):
-        game_loop()
-        if score != None and score > high_score:
-            high_score = score
-            print("Saving new high score: " + str(high_score));
-            with io.open(high_score_path, "w") as f:
-                f.write(str(score))
-        start_text()
-    elif display.pressed(badger2040.BUTTON_A):
-        clear_screen()
-        display.update_speed(badger2040.UPDATE_FAST)
-        display.update()
-        display.halt()
+def main():
+    global high_score
+    start_text()
+    while True:
+        if display.pressed(badger2040.BUTTON_UP):
+            game_loop()
+            if score is not None and score > high_score:
+                high_score = score
+                print("Saving new high score: " + str(high_score))
+                with io.open(high_score_path, "w") as f:
+                    f.write(str(score))
+            start_text()
+        elif display.pressed(badger2040.BUTTON_A):
+            clear_screen()
+            display.set_update_speed(badger2040.UPDATE_FAST)
+            display.update()
+            turn_off()
+
+main()

@@ -6,4 +6,4 @@ This is the Dino Game from Google Chrome coded in MicroPython and ported to [Pim
 
 ## License
 
-&copy; 2022 Daniel Kurek & Jerzy Głowacki by MIT License.
+&copy; 2023 Daniel Kurek & Jerzy Głowacki by MIT License.
